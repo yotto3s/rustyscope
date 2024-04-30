@@ -20,7 +20,7 @@ pub enum Token {
 }
 
 impl std::fmt::Display for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Token::Eof => write!(f, "EOF"),
             Token::Def => write!(f, "def"),
@@ -28,6 +28,41 @@ impl std::fmt::Display for Token {
             Token::Identifier(id) => write!(f, "identifier: {}", id),
             Token::Number(num) => write!(f, "number literal: {}", num),
             Token::Other(ch) => write!(f, "{}", ch),
+        }
+    }
+}
+
+/// Error struct.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Error {
+    msg: String,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}
+
+/// A token iterator.
+#[derive(Debug)]
+pub struct TokenIter<'a, 'b: 'a> {
+    chars: &'a mut Peekable<Chars<'b>>,
+}
+
+impl<'a, 'b: 'a> TokenIter<'a, 'b> {
+    /// Create a new TokenIter.
+    pub fn new(chars: &'a mut Peekable<Chars<'b>>) -> Self {
+        Self { chars }
+    }
+}
+
+impl<'a, 'b: 'a> Iterator for TokenIter<'a, 'b> {
+    type Item = Result<Token, Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.chars.peek() {
+            Some(_) => Some(get_token(&mut self.chars)),
+            None => None,
         }
     }
 }
@@ -44,7 +79,7 @@ impl std::fmt::Display for Token {
 /// assert_eq!(get_token(&mut chars).unwrap(), Token::Other('='));
 /// assert_eq!(get_token(&mut chars).unwrap(), Token::Number(1.2));
 /// ```
-pub fn get_token(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
+pub fn get_token(chars: &mut Peekable<Chars>) -> Result<Token, Error> {
     skip_while(chars, |c| c.is_whitespace());
 
     match chars.peek() {
@@ -95,15 +130,6 @@ where
     ret
 }
 
-fn skip_whitespace(chars: &mut Peekable<Chars>) {
-    while let Some(c) = chars.peek() {
-        if !c.is_whitespace() {
-            return;
-        }
-        chars.next();
-    }
-}
-
 fn is_identifier_char(ch: &char) -> bool {
     match ch {
         '_' => true,
@@ -111,18 +137,22 @@ fn is_identifier_char(ch: &char) -> bool {
     }
 }
 
-fn identifier(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
+fn identifier(chars: &mut Peekable<Chars>) -> Result<Token, Error> {
     match chars.peek() {
-        None => Err(()),
+        None => Err(Error {
+            msg: format!("Unexpected end of file"),
+        }),
         Some(c) => {
             if !c.is_alphabetic() {
-                Err(())
+                Err(Error {
+                    msg: format!("Expected alphabetic character"),
+                })
             } else {
                 let pred = is_identifier_char;
                 let id = take_string_while(chars, pred);
 
                 match id.as_str() {
-                    "" => Err(()),
+                    "" => unreachable!(),
                     "def" => Ok(Token::Def),
                     "extern" => Ok(Token::Extern),
                     _ => Ok(Token::Identifier(id)),
@@ -146,9 +176,11 @@ fn fraction(chars: &mut Peekable<Chars>) -> String {
     }
 }
 
-fn number(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
+fn number(chars: &mut Peekable<Chars>) -> Result<Token, Error> {
     match chars.peek() {
-        None => Err(()),
+        None => Err(Error {
+            msg: format!("Expected number literal"),
+        }),
         Some(_) => {
             let frac = fraction(chars);
             if !frac.is_empty() {
@@ -158,9 +190,13 @@ fn number(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
                 let frac = fraction(chars);
                 let num = decimal + &frac;
                 if !num.is_empty() {
-                    Ok(Token::Number(num.parse::<f64>().unwrap()))
+                    Ok(Token::Number(
+                        num.parse::<f64>().expect("Failed to parse number literal"),
+                    ))
                 } else {
-                    Err(())
+                    Err(Error {
+                        msg: format!("Expected number literal"),
+                    })
                 }
             }
         }
@@ -196,9 +232,19 @@ mod tests {
             Token::Identifier("hello12".to_string())
         );
         let mut chars = " hello12_3".chars().peekable();
-        assert_eq!(identifier(&mut chars), Err(()));
+        assert_eq!(
+            identifier(&mut chars),
+            Err(Error {
+                msg: format!("Expected alphabetic character")
+            })
+        );
         let mut chars = "1hello12_3".chars().peekable();
-        assert_eq!(identifier(&mut chars), Err(()));
+        assert_eq!(
+            identifier(&mut chars),
+            Err(Error {
+                msg: format!("Expected alphabetic character")
+            })
+        );
         let mut chars = "hello world guys".chars().peekable();
         assert_eq!(
             identifier(&mut chars).unwrap(),
@@ -235,7 +281,12 @@ mod tests {
 
         let test_false = |str: &str| {
             let mut chars = str.chars().peekable();
-            assert_eq!(number(&mut chars), Err(()));
+            assert_eq!(
+                number(&mut chars),
+                Err(Error {
+                    msg: format!("Expected number literal")
+                })
+            );
         };
 
         test_false("abc");

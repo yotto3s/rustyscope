@@ -1,15 +1,27 @@
 //! Parser implementation for kaleidoscope.
 
-use std::collections::HashMap;
 use std::iter::Peekable;
 
 use crate::lexer::*;
 
 /// Represents parser error.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Error {
-    /// Error description.
-    pub msg: String,
+#[derive(Debug, Clone, PartialEq)]
+pub enum Error {
+    /// Wrong token.
+    WrongToken(String, Token),
+    /// Expected some token, but no token found.
+    NoToken(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Error::WrongToken(expected, actual) => {
+                write!(f, "expected {}, found {}", expected, actual)
+            }
+            Error::NoToken(expected) => write!(f, "expected {}, found nothing", expected),
+        }
+    }
 }
 
 /// Binary operator precedence
@@ -116,12 +128,8 @@ where
 {
     match tokens.next() {
         Some(Token::Number(x)) => Ok(Box::new(ExprAST::Number(x))),
-        Some(t) => Err(Error {
-            msg: format!("Expected number, found {}", t),
-        }),
-        None => Err(Error {
-            msg: format!("Expected number, found nothing"),
-        }),
+        Some(t) => Err(Error::WrongToken(format!("number"), t)),
+        None => Err(Error::NoToken(format!("number"))),
     }
 }
 
@@ -134,14 +142,12 @@ where
             let e = parse_expr(tokens)?;
             match tokens.next() {
                 Some(Token::Other(')')) => Ok(e),
-                _ => Err(Error {
-                    msg: format!("Expected ')'"),
-                }),
+                Some(t) => Err(Error::WrongToken("')'".to_string(), t)),
+                None => Err(Error::NoToken("')'".to_string())),
             }
         }
-        _ => Err(Error {
-            msg: format!("Expected '('"),
-        }),
+        Some(t) => Err(Error::WrongToken("'('".to_string(), t)),
+        None => Err(Error::NoToken("'('".to_string())),
     }
 }
 
@@ -170,19 +176,16 @@ where
                 } else {
                     Vec::new()
                 };
-                if tokens.next() == Some(Token::Other(')')) {
-                    Ok(Box::new(ExprAST::CallExpr(id, expressions)))
-                } else {
-                    Err(Error {
-                        msg: format!("Expected ')'"),
-                    })
+                match tokens.next() {
+                    Some(Token::Other(')')) => Ok(Box::new(ExprAST::CallExpr(id, expressions))),
+                    Some(t) => Err(Error::WrongToken("')'".to_string(), t)),
+                    None => Err(Error::NoToken("')'".to_string())),
                 }
             }
             _ => Ok(Box::new(ExprAST::Variable(id))),
         },
-        _ => Err(Error {
-            msg: format!("Expected identifier"),
-        }),
+        Some(t) => Err(Error::WrongToken("identifier".to_string(), t)),
+        None => Err(Error::NoToken("identifier".to_string())),
     }
 }
 
@@ -195,14 +198,13 @@ where
             Token::Identifier(_) => parse_identifier_expr(tokens),
             Token::Number(_) => parse_number_expr(tokens),
             Token::Other('(') => parse_paren_expr(tokens),
-            _ => Err(Error {
-                msg: format!("Expected identifier, number or '('"),
-            }),
+            t => Err(Error::WrongToken(
+                "identifier, number or '('".to_string(),
+                t.clone(),
+            )),
         }
     } else {
-        Err(Error {
-            msg: format!("Expected identifier, number or '('"),
-        })
+        Err(Error::NoToken("identifier, number or '('".to_string()))
     }
 }
 
@@ -210,56 +212,54 @@ fn parse_prototype<I>(tokens: &mut TokenIter<I>) -> Result<Box<PrototypeAST>, Er
 where
     I: Iterator<Item = Token>,
 {
-    if let Some(Token::Identifier(name)) = tokens.next() {
-        if tokens.next() != Some(Token::Other('(')) {
-            return Err(Error {
-                msg: format!("Expected '('"),
-            });
-        }
-        let mut ids = Vec::new();
-        loop {
+    match tokens.next() {
+        Some(Token::Identifier(name)) => {
             match tokens.next() {
-                Some(Token::Identifier(id)) => ids.push(id),
-                Some(Token::Other(')')) => break Ok(Box::new(PrototypeAST(name, ids))),
-                _ => {
-                    break Err(Error {
-                        msg: format!("Expected identifier or ')'"),
-                    })
+                Some(Token::Other('(')) => (),
+                Some(t) => return Err(Error::WrongToken("'('".to_string(), t)),
+                None => return Err(Error::NoToken("'('".to_string())),
+            }
+
+            let mut ids = Vec::new();
+            loop {
+                match tokens.next() {
+                    Some(Token::Identifier(id)) => ids.push(id),
+                    Some(Token::Other(')')) => break Ok(Box::new(PrototypeAST(name, ids))),
+                    Some(t) => break Err(Error::WrongToken("identifier or ')'".to_string(), t)),
+                    None => break Err(Error::NoToken("identifier or ')'".to_string())),
                 }
             }
         }
-    } else {
-        Err(Error {
-            msg: format!("Expected identifier"),
-        })
+        Some(t) => Err(Error::WrongToken("identifier".to_string(), t)),
+        None => Err(Error::NoToken("identifier".to_string())),
     }
 }
 
-fn parse_definition<I>(tokens: &mut TokenIter<I>) -> Result<Box<FunctionAST>, Error>
+/// definition ::= 'def' prototype expression
+pub fn parse_definition<I>(tokens: &mut TokenIter<I>) -> Result<Box<FunctionAST>, Error>
 where
     I: Iterator<Item = Token>,
 {
-    if tokens.next() != Some(Token::Def) {
-        Err(Error {
-            msg: format!("Expected 'def'"),
-        })
-    } else {
-        let proto = parse_prototype(tokens)?;
-        let expr = parse_expr(tokens)?;
-        Ok(Box::new(FunctionAST(proto, expr)))
+    match tokens.next() {
+        Some(Token::Def) => {
+            let proto = parse_prototype(tokens)?;
+            let expr = parse_expr(tokens)?;
+            Ok(Box::new(FunctionAST(proto, expr)))
+        }
+        Some(t) => Err(Error::WrongToken("'def'".to_string(), t)),
+        None => Err(Error::NoToken("'def'".to_string())),
     }
 }
 
-fn parse_extern<I>(tokens: &mut TokenIter<I>) -> Result<Box<PrototypeAST>, Error>
+/// extern ::= 'extern' prototype
+pub fn parse_extern<I>(tokens: &mut TokenIter<I>) -> Result<Box<PrototypeAST>, Error>
 where
     I: Iterator<Item = Token>,
 {
-    if tokens.next() != Some(Token::Extern) {
-        Err(Error {
-            msg: format!("Expected 'extern'"),
-        })
-    } else {
-        parse_prototype(tokens)
+    match tokens.next() {
+        Some(Token::Extern) => parse_prototype(tokens),
+        Some(t) => Err(Error::WrongToken("'extern'".to_string(), t)),
+        None => Err(Error::NoToken("'extern'".to_string())),
     }
 }
 
@@ -302,9 +302,10 @@ mod tests {
         let ast = parse_prototype(&mut tokens);
         assert_eq!(
             ast,
-            Err(Error {
-                msg: format!("Expected '('")
-            })
+            Err(Error::WrongToken(
+                "'('".to_string(),
+                Token::Identifier("x".to_string())
+            ))
         );
 
         let mut tokens = [
@@ -316,11 +317,6 @@ mod tests {
         .into_iter()
         .peekable();
         let ast = parse_prototype(&mut tokens);
-        assert_eq!(
-            ast,
-            Err(Error {
-                msg: format!("Expected identifier or ')'")
-            })
-        );
+        assert_eq!(ast, Err(Error::NoToken("identifier or ')'".to_string())));
     }
 }
