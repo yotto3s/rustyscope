@@ -28,9 +28,11 @@ impl std::fmt::Display for Error {
 fn binop_precedence(ch: char) -> Option<u32> {
     match ch {
         '<' => Some(10),
+        '>' => Some(10),
         '+' => Some(20),
         '-' => Some(20),
         '*' => Some(40),
+        '/' => Some(40),
         _ => None,
     }
 }
