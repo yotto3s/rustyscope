@@ -19,6 +19,19 @@ pub enum Token {
     Other(char),
 }
 
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            Token::Eof => write!(f, "EOF"),
+            Token::Def => write!(f, "def"),
+            Token::Extern => write!(f, "extern"),
+            Token::Identifier(id) => write!(f, "identifier: {}", id),
+            Token::Number(num) => write!(f, "number literal: {}", num),
+            Token::Other(ch) => write!(f, "{}", ch),
+        }
+    }
+}
+
 /// Get next token of given chars.
 ///
 /// # Exemples
@@ -35,16 +48,15 @@ pub fn get_token(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
     skip_while(chars, |c| c.is_whitespace());
 
     match chars.peek() {
-        None => {
-            Ok(Token::Eof)
-        },
+        None => Ok(Token::Eof),
         Some(&c) => {
             if c.is_alphabetic() {
                 identifier(chars)
-            } else if c.is_numeric() || c == '.'{
+            } else if c.is_numeric() || c == '.' {
                 number(chars)
             } else if c == '#' {
-                todo!();
+                skip_while(chars, |&c| c != '\n' && c != '\r');
+                get_token(chars)
             } else {
                 chars.next();
                 Ok(Token::Other(c))
@@ -56,7 +68,8 @@ pub fn get_token(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
 fn skip_while<I, P>(iter: &mut Peekable<I>, predicate: P)
 where
     I: Iterator,
-    P: Fn(&I::Item) -> bool {
+    P: Fn(&I::Item) -> bool,
+{
     while let Some(x) = iter.peek() {
         if !predicate(x) {
             return;
@@ -66,7 +79,9 @@ where
 }
 
 fn take_string_while<P>(chars: &mut Peekable<Chars>, predicate: P) -> String
-where P: Fn(&char) -> bool {
+where
+    P: Fn(&char) -> bool,
+{
     let mut ret = String::new();
     while let Some(c) = chars.peek() {
         if predicate(c) {
@@ -96,20 +111,22 @@ fn is_identifier_char(ch: &char) -> bool {
     }
 }
 
-fn identifier(chars: &mut Peekable<Chars>) -> Result<Token,()> {
+fn identifier(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
     match chars.peek() {
         None => Err(()),
-        Some(c) => if !c.is_alphabetic() {
-            Err(())
-        } else {
-            let pred = is_identifier_char;
-            let id = take_string_while(chars, pred);
+        Some(c) => {
+            if !c.is_alphabetic() {
+                Err(())
+            } else {
+                let pred = is_identifier_char;
+                let id = take_string_while(chars, pred);
 
-            match id.as_str() {
-                "" => Err(()),
-                "def" => Ok(Token::Def),
-                "extern" => Ok(Token::Extern),
-                _ => Ok(Token::Identifier(id)),
+                match id.as_str() {
+                    "" => Err(()),
+                    "def" => Ok(Token::Def),
+                    "extern" => Ok(Token::Extern),
+                    _ => Ok(Token::Identifier(id)),
+                }
             }
         }
     }
@@ -124,12 +141,12 @@ fn fraction(chars: &mut Peekable<Chars>) -> String {
         Some('.') => {
             chars.next();
             ".".to_string() + &get_number_string(chars)
-        },
-        _ => "".to_string()
+        }
+        _ => "".to_string(),
     }
 }
 
-fn number(chars: &mut Peekable<Chars>) -> Result<Token,()> {
+fn number(chars: &mut Peekable<Chars>) -> Result<Token, ()> {
     match chars.peek() {
         None => Err(()),
         Some(_) => {
@@ -153,6 +170,7 @@ fn number(chars: &mut Peekable<Chars>) -> Result<Token,()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_skip_while() {
         let mut chars = "  123".chars().peekable();
@@ -168,19 +186,34 @@ mod tests {
     #[test]
     fn test_identifier() {
         let mut chars = "hello12_3".chars().peekable();
-        assert_eq!(identifier(&mut chars).unwrap(), Token::Identifier("hello12_3".to_string()));
+        assert_eq!(
+            identifier(&mut chars).unwrap(),
+            Token::Identifier("hello12_3".to_string())
+        );
         let mut chars = "hello12-3".chars().peekable();
-        assert_eq!(identifier(&mut chars).unwrap(), Token::Identifier("hello12".to_string()));
+        assert_eq!(
+            identifier(&mut chars).unwrap(),
+            Token::Identifier("hello12".to_string())
+        );
         let mut chars = " hello12_3".chars().peekable();
         assert_eq!(identifier(&mut chars), Err(()));
         let mut chars = "1hello12_3".chars().peekable();
         assert_eq!(identifier(&mut chars), Err(()));
         let mut chars = "hello world guys".chars().peekable();
-        assert_eq!(identifier(&mut chars).unwrap(), Token::Identifier("hello".to_string()));
+        assert_eq!(
+            identifier(&mut chars).unwrap(),
+            Token::Identifier("hello".to_string())
+        );
         assert_eq!(chars.next().unwrap(), ' ');
-        assert_eq!(identifier(&mut chars).unwrap(), Token::Identifier("world".to_string()));
+        assert_eq!(
+            identifier(&mut chars).unwrap(),
+            Token::Identifier("world".to_string())
+        );
         assert_eq!(chars.next().unwrap(), ' ');
-        assert_eq!(identifier(&mut chars).unwrap(), Token::Identifier("guys".to_string()));
+        assert_eq!(
+            identifier(&mut chars).unwrap(),
+            Token::Identifier("guys".to_string())
+        );
     }
 
     #[test]
@@ -219,23 +252,25 @@ mod tests {
             }
         };
 
-        test("def x = 1",
-             &[
+        test(
+            "def x = 1",
+            &[
                 Token::Def,
                 Token::Identifier("x".to_string()),
                 Token::Other('='),
                 Token::Number(1.0),
-             ]);
-        test("extern x;\ndef defx=1.2y",
-             &[
+            ],
+        );
+        test(
+            "extern #x;\ndef defx=1.2y",
+            &[
                 Token::Extern,
-                Token::Identifier("x".to_string()),
-                Token::Other(';'),
                 Token::Def,
                 Token::Identifier("defx".to_string()),
                 Token::Other('='),
                 Token::Number(1.2),
                 Token::Identifier("y".to_string()),
-             ]);
+            ],
+        );
     }
 }
