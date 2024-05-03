@@ -4,11 +4,15 @@ use std::iter::Peekable;
 use rustyscope::*;
 
 fn main() -> std::io::Result<()> {
-    main_loop()?;
+    let context = inkwell::context::Context::create();
+    let module = context.create_module("top_module");
+    let builder = context.create_builder();
+    let mut compiler = compiler::Compiler::new(&context, &module, &builder);
+    main_loop(&mut compiler)?;
     Ok(())
 }
 
-fn main_loop() -> std::io::Result<()> {
+fn main_loop(compiler: &mut compiler::Compiler) -> std::io::Result<()> {
     let stdin = std::io::stdin();
     'outer: loop {
         print!("ready> ");
@@ -33,8 +37,8 @@ fn main_loop() -> std::io::Result<()> {
                     tokens.next();
                     continue 'inner;
                 }
-                lexer::Token::Def => handle_definition(&mut tokens),
-                lexer::Token::Extern => handle_extern(&mut tokens),
+                lexer::Token::Def => handle_definition(&mut tokens, compiler),
+                lexer::Token::Extern => handle_extern(&mut tokens, compiler),
                 lexer::Token::Other(':') => {
                     let _ = tokens.next();
                     match handle_repl_command(&mut tokens) {
@@ -43,7 +47,7 @@ fn main_loop() -> std::io::Result<()> {
                         Err(()) => break 'inner,
                     }
                 }
-                _ => handle_expression(&mut tokens),
+                _ => handle_expression(&mut tokens, compiler),
             };
 
             if let Err(e) = result {
@@ -93,29 +97,47 @@ where
     }
 }
 
-fn handle_definition<I>(tokens: &mut Peekable<I>) -> Result<(), parser::Error>
+fn handle_definition<I>(
+    tokens: &mut Peekable<I>,
+    compiler: &mut compiler::Compiler,
+) -> Result<(), parser::Error>
 where
     I: Iterator<Item = lexer::Token>,
 {
-    let _ = parser::parse_definition(tokens)?;
-    println!("parsed a definition");
+    let ast = parser::parse_definition(tokens)?;
+    match compiler.compile_function(&ast) {
+        Ok(fnir) => println!("parsed a definition:{}", fnir.to_string()),
+        Err(e) => println!("error: {}", e),
+    }
     Ok(())
 }
 
-fn handle_extern<I>(tokens: &mut Peekable<I>) -> Result<(), parser::Error>
+fn handle_extern<I>(
+    tokens: &mut Peekable<I>,
+    compiler: &mut compiler::Compiler,
+) -> Result<(), parser::Error>
 where
     I: Iterator<Item = lexer::Token>,
 {
-    let _ = parser::parse_extern(tokens)?;
-    println!("parsed an extern");
+    let ast = parser::parse_extern(tokens)?;
+    match compiler.compile_prototype(&ast) {
+        Ok(ir) => println!("parsed a prototype:{}", ir.to_string()),
+        Err(e) => println!("error: {}", e),
+    }
     Ok(())
 }
 
-fn handle_expression<I>(tokens: &mut Peekable<I>) -> Result<(), parser::Error>
+fn handle_expression<I>(
+    tokens: &mut Peekable<I>,
+    compiler: &mut compiler::Compiler,
+) -> Result<(), parser::Error>
 where
     I: Iterator<Item = lexer::Token>,
 {
-    let _ = parser::parse_expr(tokens)?;
-    println!("parsed a top level expression");
+    let ast = parser::parse_top_level_expr(tokens)?;
+    match compiler.compile_function(&ast) {
+        Ok(ir) => println!("parsed a prototype:{}", ir.to_string()),
+        Err(e) => println!("error: {}", e),
+    }
     Ok(())
 }

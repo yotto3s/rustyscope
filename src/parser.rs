@@ -71,12 +71,22 @@ pub enum ExprAST {
 
 /// Represents prototype(declaration) i.e. `def add(x, y)`
 #[derive(Debug, Clone, PartialEq)]
-pub struct PrototypeAST(String, Vec<String>);
+pub struct PrototypeAST(pub String, pub Vec<String>);
 /// Represents function definition, i.e. `def add(x, y) = x + y`
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionAST(Box<PrototypeAST>, Box<ExprAST>);
+pub struct FunctionAST(pub Box<PrototypeAST>, pub Box<ExprAST>);
 
 type TokenIter<I> = Peekable<I>;
+
+/// Parses a top level expression.
+pub fn parse_top_level_expr<I>(tokens: &mut TokenIter<I>) -> Result<Box<FunctionAST>, Error>
+where
+    I: Iterator<Item = Token>,
+{
+    let expr = parse_expr(tokens)?;
+    let proto = Box::new(PrototypeAST(String::from("__anon_expr"), Vec::new()));
+    Ok(Box::new(FunctionAST(proto, expr)))
+}
 
 /// Parses a expression.
 pub fn parse_expr<I>(tokens: &mut TokenIter<I>) -> Result<Box<ExprAST>, Error>
